@@ -1,10 +1,14 @@
 // Máy chủ nhỏ riêng để phục vụ tính năng "Xem AR" — thay thế tmpfiles.org.
 //
 // Vì sao cần máy chủ này: Google Scene Viewer chạy như 1 app RIÊNG BIỆT,
-// nó phải tự TẢI file .glb qua Internet bằng 1 link https thật — không thể
-// dùng link "blob:" (chỉ có nghĩa nội bộ trong app) hay máy chủ lạ trả sai
-// header. Máy chủ này chỉ làm đúng 2 việc: (1) nhận file .glb app gửi lên,
-// (2) phát lại đúng Content-Type "model/gltf-binary" mà Scene Viewer cần.
+// nó phải tự TẢI file mô hình qua 1 link https thật — không thể dùng link
+// "blob:" (chỉ có nghĩa nội bộ trong app) hay máy chủ lạ trả sai header.
+// Máy chủ này chỉ làm đúng 2 việc: (1) nhận file .gltf app gửi lên, (2)
+// phát lại đúng Content-Type "model/gltf+json" mà Scene Viewer cần.
+//
+// Định dạng dùng là .gltf (JSON thường, buffer nhúng base64 ngay trong
+// JSON) thay vì .glb nhị phân — đơn giản, ít rủi ro sai lệch byte hơn khi
+// tự đóng gói ở phía app.
 //
 // File chỉ lưu TẠM trong RAM (không ghi ra ổ đĩa), tự xoá sau 30 phút hoặc
 // khi máy chủ khởi động lại — không lưu trữ lâu dài, không có gì đọng lại.
@@ -41,7 +45,7 @@ setInterval(() => {
 }, 5 * 60 * 1000).unref();
 
 app.get("/", (req, res) => {
-  res.type("text/plain").send("AR temp-file server OK. POST /upload, GET /models/:id.glb");
+  res.type("text/plain").send("AR temp-file server OK. POST /upload, GET /models/:id.gltf");
 });
 
 app.post("/upload", upload.single("file"), (req, res) => {
@@ -53,14 +57,14 @@ app.post("/upload", upload.single("file"), (req, res) => {
   store.set(id, { buffer: req.file.buffer, expiresAt: Date.now() + TTL_MS });
 
   const baseUrl = `${req.protocol}://${req.get("host")}`;
-  res.json({ url: `${baseUrl}/models/${id}.glb` });
+  res.json({ url: `${baseUrl}/models/${id}.gltf` });
 });
 
-app.get("/models/:id.glb", (req, res) => {
+app.get("/models/:id.gltf", (req, res) => {
   const item = store.get(req.params.id);
   if (!item) return res.status(404).send("Không tìm thấy hoặc file đã hết hạn (30 phút).");
 
-  res.setHeader("Content-Type", "model/gltf-binary");
+  res.setHeader("Content-Type", "model/gltf+json");
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Content-Length", item.buffer.length);
   res.send(item.buffer);
