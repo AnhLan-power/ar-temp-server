@@ -18,6 +18,16 @@ const multer = require("multer");
 const crypto = require("crypto");
 
 const app = express();
+
+// QUAN TRỌNG: Render (và hầu hết PaaS khác) giải mã HTTPS ở lớp edge/proxy
+// của họ rồi mới chuyển tiếp request vào container bằng HTTP thường. Nếu
+// không bật "trust proxy", Express sẽ đọc req.protocol là "http" (đúng như
+// những gì nó THẤY ở tầng container), khiến link trả về trong JSON bị sai
+// thành "http://..." dù người dùng truy cập bằng https://. Đây chính là lý
+// do Chrome báo "Insecure download blocked" và rất có thể là nguyên nhân
+// khiến Scene Viewer từ chối tải model bấy lâu nay.
+app.set("trust proxy", true);
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 } // tối đa 50MB / file, đủ dùng cho 1 cấu kiện
@@ -56,7 +66,12 @@ app.post("/upload", upload.single("file"), (req, res) => {
   const id = crypto.randomUUID();
   store.set(id, { buffer: req.file.buffer, expiresAt: Date.now() + TTL_MS });
 
-  const baseUrl = `${req.protocol}://${req.get("host")}`;
+  // Luôn ép "https" khi chạy công khai (Render...) — không dựa vào
+  // req.protocol vì có thể bị sai qua proxy. Riêng khi chạy thử trên máy
+  // (localhost) thì giữ nguyên "http" để test nội bộ vẫn hoạt động được.
+  const host = req.get("host") || "";
+  const isLocal = host.includes("localhost") || host.includes("127.0.0.1");
+  const baseUrl = `${isLocal ? "http" : "https"}://${host}`;
   res.json({ url: `${baseUrl}/models/${id}.gltf` });
 });
 
